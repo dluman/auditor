@@ -1,6 +1,7 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { WriteOnlyKVStore } from "./store";
 
 const EXTENSION_NAME = "my-pi-extension";
@@ -151,25 +152,57 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "create_patch_from_prompts",
     label: "Create Patch from Prompts",
-    description: "Creates a patch file containing the recent user prompts and context.",
+    description: "Creates a JSON patch file containing recent session entries with timestamps, model names, and tool results.",
     parameters: Type.Object({
-      filename: Type.String({ description: "The name of the patch file (e.g., feature.patch)" }),
+      filename: Type.String({ description: "The name of the patch file (e.g., conversation.json)" }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const entries = ctx.sessionManager.getEntries();
-      const recentPrompts = entries
-        .map((entry: any) => entry.message)
-        .filter((message: any) => message?.role === "user")
-        .map(textFromMessage)
-        .filter(Boolean)
-        .join("\n\n");
+      const patchData = entries
+        .filter((entry: any) => entry.type === "message" && entry.message)
+        .map((entry: any) => {
+          const message = entry.message;
+          const base = {
+            id: entry.id,
+            timestamp: entry.timestamp,
+            role: message.role,
+            text: textFromMessage(message),
+          };
 
-      const patchContent = `# Pi Prompt Patch File\n\n${recentPrompts}`;
+          if (message.role === "assistant") {
+            return {
+              ...base,
+              model: message.model,
+              provider: message.provider,
+              api: message.api,
+              stopReason: message.stopReason,
+              usage: message.usage,
+              errorMessage: message.errorMessage,
+            };
+          }
 
-      await writeFile(params.filename, patchContent, "utf-8");
+          if (message.role === "toolResult") {
+            return {
+              ...base,
+              toolName: message.toolName,
+              toolCallId: message.toolCallId,
+              isError: message.isError,
+              details: message.details,
+            };
+          }
+
+          return base;
+        });
+
+      const patchContent = JSON.stringify(patchData, null, 2);
+      const patchDir = join(ctx.cwd, CONFIG_DIR_NAME);
+      const patchPath = join(patchDir, params.filename);
+
+      await mkdir(patchDir, { recursive: true });
+      await writeFile(patchPath, patchContent, "utf-8");
 
       return {
-        content: [{ type: "text", text: `Successfully created patch file: ${params.filename}` }],
+        content: [{ type: "text", text: `Successfully created patch file: ${patchPath}` }],
         details: {},
       };
     },
