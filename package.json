@@ -1,0 +1,35 @@
+{
+  "name": "my-pi-extension",
+  "version": "0.1.0",
+  "description": "A Pi coding agent extension that logs all LLM interactions to a write-only key/value store and exports recent prompts as patch files.",
+  "keywords": [
+    "pi-package"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/youruser/my-pi-extension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/youruser/my-pi-extension/issues"
+  },
+  "homepage": "https://github.com/youruser/my-pi-extension#readme",
+  "main": "extensions/index.ts",
+  "files": [
+    "extensions",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "dependencies": {
+    "unstorage": "^1.17.5"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}
