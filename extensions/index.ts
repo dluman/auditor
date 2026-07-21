@@ -50,11 +50,7 @@ export default function (pi: ExtensionAPI) {
       value: { type, data },
     };
 
-    if (type === "input") {
-      // A new user prompt starts a fresh group; flush any stranded group first.
-      await flushGroup();
-      currentGroup = [entry];
-    } else if (type === "agent_start") {
+    if (type === "agent_start") {
       if (currentGroup.length === 0) {
         currentGroup = [entry];
       } else {
