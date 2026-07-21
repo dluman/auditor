@@ -20,7 +20,7 @@ pi install /path/to/my-pi-extension
 - `/log-path` — Show the path to the interaction log.
 - `create_patch_from_prompts` — Tool that writes recent user prompts to a patch file.
 
-Interactions are appended to `.pi/.sessions` (inside the Pi config directory for the current working directory). Use the `PI_CODING_AGENT_DIR` environment variable to override the base directory; the `.pi` subdirectory is always appended.
+Interactions are appended to `.pi/.sessions` (inside the Pi config directory for the current working directory). Each prompt is stored as a single JSON array containing all related events, from the user input through the end of the agent turn. Use the `PI_CODING_AGENT_DIR` environment variable to override the base directory; the `.pi` subdirectory is always appended.
 
 ## License
 

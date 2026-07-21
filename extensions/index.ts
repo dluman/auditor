@@ -28,15 +28,43 @@ function textFromMessage(message: any): string {
 export default function (pi: ExtensionAPI) {
   const store = WriteOnlyKVStore.defaultFor();
   let sequence = 0;
+  let currentGroup: Array<{ key: string; timestamp: string; value: { type: string; data: unknown } }> = [];
+
+  async function flushGroup() {
+    if (currentGroup.length === 0) return;
+    try {
+      await store.write(currentGroup);
+    } catch (error) {
+      // Write-only store failures must not interrupt the agent.
+      console.error(`[${EXTENSION_NAME}] failed to write log group:`, error);
+    }
+    currentGroup = [];
+  }
 
   async function log(type: string, data: unknown) {
     sequence++;
     const key = `${Date.now().toString(36)}-${sequence.toString(36).padStart(6, "0")}-${type}`;
-    try {
-      await store.write(key, { type, data });
-    } catch (error) {
-      // Write-only store failures must not interrupt the agent.
-      console.error(`[${EXTENSION_NAME}] failed to write log entry:`, error);
+    const entry = {
+      key,
+      timestamp: new Date().toISOString(),
+      value: { type, data },
+    };
+
+    if (type === "input") {
+      // A new user prompt starts a fresh group; flush any stranded group first.
+      await flushGroup();
+      currentGroup = [entry];
+    } else if (type === "agent_start") {
+      if (currentGroup.length === 0) {
+        currentGroup = [entry];
+      } else {
+        currentGroup.push(entry);
+      }
+    } else if (type === "agent_end") {
+      currentGroup.push(entry);
+      await flushGroup();
+    } else {
+      currentGroup.push(entry);
     }
   }
 

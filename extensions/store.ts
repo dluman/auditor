@@ -12,7 +12,7 @@ export interface StoreEntry {
 /**
  * Create a write-only, append-only unstorage driver backed by a JSONL dotfile.
  *
- * - `setItem` appends a new JSON line `{ key, timestamp, value }`.
+ * - `setItem` appends a new JSON line containing an array of prompt events.
  * - Read, list, and delete operations are no-ops, preserving write-only semantics.
  */
 function jsonlDriver(filePath: string) {
@@ -31,16 +31,11 @@ function jsonlDriver(filePath: string) {
     async removeItem() {
       // write-only: ignore
     },
-    async setItem(key: string, value: string) {
+    async setItem(_key: string, value: string) {
       // unstorage passes the serialized JSON string to the driver.
-      const parsed = JSON.parse(value);
-      const entry: StoreEntry = {
-        key,
-        timestamp: new Date().toISOString(),
-        value: parsed,
-      };
+      // Each prompt is stored as a single JSON array on its own line.
       await mkdir(dirname(filePath), { recursive: true });
-      await appendFile(filePath, JSON.stringify(entry) + "\n", "utf-8");
+      await appendFile(filePath, value + "\n", "utf-8");
     },
     async getMeta() {
       return {};
@@ -84,8 +79,8 @@ export class WriteOnlyKVStore {
     return new WriteOnlyKVStore(filePath);
   }
 
-  async write(key: string, value: unknown): Promise<void> {
+  async write(entries: StoreEntry[]): Promise<void> {
     // unstorage accepts null | string | number | boolean | object.
-    await this.storage.setItem(key, value as Record<string, unknown>);
+    await this.storage.setItem("group", entries as any);
   }
 }
