@@ -26,7 +26,7 @@ function textFromMessage(message: any): string {
 }
 
 export default function (pi: ExtensionAPI) {
-  const store = WriteOnlyKVStore.defaultFor(EXTENSION_NAME);
+  const store = WriteOnlyKVStore.defaultFor();
   let sequence = 0;
 
   async function log(type: string, data: unknown) {

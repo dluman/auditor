@@ -76,11 +76,11 @@ export class WriteOnlyKVStore {
     this.storage = createStorage({ driver: jsonlDriver(filePath) });
   }
 
-  static defaultFor(extensionName: string): WriteOnlyKVStore {
+  static defaultFor(): WriteOnlyKVStore {
     const baseDir = process.env.PI_CODING_AGENT_DIR ?? process.cwd();
     const agentDir = join(baseDir, CONFIG_DIR_NAME);
-    // Dotfile inside the Pi config directory.
-    const filePath = join(agentDir, `.${extensionName}.jsonl`);
+    // Consistent dotfile name inside the Pi config directory.
+    const filePath = join(agentDir, ".sessions");
     return new WriteOnlyKVStore(filePath);
   }
 
