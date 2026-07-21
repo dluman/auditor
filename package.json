@@ -1,5 +1,5 @@
 {
-  "name": "my-pi-extension",
+  "name": "auditor",
   "version": "0.1.0",
   "description": "A Pi coding agent extension that logs all LLM interactions to a write-only key/value store and exports recent prompts as patch files.",
   "keywords": [
@@ -8,12 +8,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/youruser/my-pi-extension.git"
+    "url": "git+https://github.com/dluman/auditor.git"
   },
   "bugs": {
-    "url": "https://github.com/youruser/my-pi-extension/issues"
+    "url": "https://github.com/dluman/auditor/issues"
   },
-  "homepage": "https://github.com/youruser/my-pi-extension#readme",
+  "homepage": "https://github.com/auditor/auditor#readme",
   "main": "extensions/index.ts",
   "files": [
     "extensions",
