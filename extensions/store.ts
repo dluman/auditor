@@ -1,7 +1,7 @@
 import { createStorage, type Storage } from "unstorage";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { mkdir, appendFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
 
 export interface StoreEntry {
   key: string;
@@ -64,7 +64,8 @@ function jsonlDriver(filePath: string) {
  * JSONL driver, so the backend can be swapped later without changing callers.
  *
  * - New entries are appended; existing entries are never read, updated, or deleted.
- * - The store path defaults to a hidden file inside the Pi agent directory.
+ * - The store path defaults to a hidden file inside the Pi config directory for
+ *   the current working directory.
  */
 export class WriteOnlyKVStore {
   readonly path: string;
@@ -76,8 +77,9 @@ export class WriteOnlyKVStore {
   }
 
   static defaultFor(extensionName: string): WriteOnlyKVStore {
-    const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
-    // Dotfile inside the already-hidden Pi agent directory.
+    const baseDir = process.env.PI_CODING_AGENT_DIR ?? process.cwd();
+    const agentDir = join(baseDir, CONFIG_DIR_NAME);
+    // Dotfile inside the Pi config directory.
     const filePath = join(agentDir, `.${extensionName}.jsonl`);
     return new WriteOnlyKVStore(filePath);
   }
