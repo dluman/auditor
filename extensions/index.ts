@@ -167,8 +167,9 @@ export default function (pi: ExtensionAPI) {
 
   // ── Session start: stage import for first turn + start periodic export timer ──
   pi.on("session_start", (_event, ctx) => {
-    // Stage import for the first turn if this is a fresh session
-    if (ctx.sessionManager.getEntries().length === 0) {
+    // Stage import for the first turn if the session has no messages yet
+    const hasMessages = ctx.sessionManager.getEntries().some((e: any) => e.type === "message");
+    if (!hasMessages) {
       const importPath = join(ctx.cwd, ".session.jsonl");
       if (existsSync(importPath)) {
         pendingImportPath = importPath;
