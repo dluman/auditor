@@ -1,10 +1,11 @@
-import { type ExtensionAPI, CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, CONFIG_DIR_NAME, CURRENT_SESSION_VERSION, type SessionHeader } from "@earendil-works/pi-coding-agent";
+import { getSetting } from "@juanibiapina/pi-extension-settings";
+import type { SettingDefinition } from "@juanibiapina/pi-extension-settings";
 import { Type } from "typebox";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { WriteOnlyKVStore } from "./store";
 
-const EXTENSION_NAME = "my-pi-extension";
+const EXTENSION_NAME = "auditor";
 
 function sanitizeContent(content: unknown): unknown {
   if (!Array.isArray(content)) return content;
@@ -25,113 +26,77 @@ function textFromMessage(message: any): string {
     .join("\n");
 }
 
-export default function (pi: ExtensionAPI) {
-  const store = WriteOnlyKVStore.defaultFor();
-  let sequence = 0;
-  let currentGroup: Array<{ key: string; timestamp: string; value: { type: string; data: unknown } }> = [];
+async function exportSession(ctx: any) {
+  const sessionFile = ctx.sessionManager.getSessionFile();
+  if (!sessionFile) return;
 
-  async function flushGroup() {
-    if (currentGroup.length === 0) return;
-    try {
-      await store.write(currentGroup);
-    } catch (error) {
-      // Write-only store failures must not interrupt the agent.
-      console.error(`[${EXTENSION_NAME}] failed to write log group:`, error);
-    }
-    currentGroup = [];
-  }
+  try {
+    const exportDir = join(ctx.cwd, CONFIG_DIR_NAME);
+    const exportPath = join(exportDir, ".session.jsonl");
 
-  async function log(type: string, data: unknown) {
-    sequence++;
-    const key = `${Date.now().toString(36)}-${sequence.toString(36).padStart(6, "0")}-${type}`;
-    const entry = {
-      key,
+    await mkdir(exportDir, { recursive: true });
+
+    const header: SessionHeader = {
+      type: "session",
+      version: CURRENT_SESSION_VERSION,
+      id: ctx.sessionManager.getSessionId(),
       timestamp: new Date().toISOString(),
-      value: { type, data },
+      cwd: ctx.sessionManager.getCwd(),
     };
 
-    if (type === "agent_start") {
-      if (currentGroup.length === 0) {
-        currentGroup = [entry];
-      } else {
-        currentGroup.push(entry);
-      }
-    } else if (type === "agent_end") {
-      currentGroup.push(entry);
-      await flushGroup();
-    } else {
-      currentGroup.push(entry);
+    const branchEntries = ctx.sessionManager.getBranch();
+    const lines: string[] = [JSON.stringify(header)];
+
+    let prevId: string | null = null;
+    for (const entry of branchEntries) {
+      const linear = { ...entry, parentId: prevId };
+      lines.push(JSON.stringify(linear));
+      prevId = entry.id;
     }
+
+    await writeFile(exportPath, lines.join("\n") + "\n", "utf-8");
+    console.log(`[${EXTENSION_NAME}] exported session to ${exportPath}`);
+  } catch (error) {
+    console.error(`[${EXTENSION_NAME}] failed to export session:`, error);
   }
+}
 
-  // ── LLM interaction logging ────────────────────────────────────────────────
+export default function (pi: ExtensionAPI) {
+  let intervalId: ReturnType<typeof setInterval> | undefined;
 
-  pi.on("input", async (event) => {
-    await log("input", {
-      text: event.text,
-      source: event.source,
-      streamingBehavior: event.streamingBehavior,
-    });
+  // ── Register extension settings ────────────────────────────────────────────
+  pi.events.emit("pi-extension-settings:register", {
+    name: EXTENSION_NAME,
+    settings: [
+      {
+        id: "autoExportInterval",
+        label: "Auto-export interval",
+        description: "Minutes between background session exports (0 = disabled)",
+        defaultValue: "5",
+        values: ["0", "5", "10", "30", "60"],
+      } satisfies SettingDefinition,
+    ],
   });
 
-  pi.on("agent_start", async () => {
-    await log("agent_start", {});
+  // ── Session start: start periodic export timer ───────────────────────────────
+  pi.on("session_start", (_event, ctx) => {
+    const minutes = parseInt(getSetting(EXTENSION_NAME, "autoExportInterval", "5"), 10);
+    if (minutes > 0) {
+      intervalId = setInterval(() => {
+        exportSession(ctx);
+      }, minutes * 60 * 1000);
+    }
   });
 
-  pi.on("context", async (event) => {
-    await log("context", {
-      messageCount: event.messages.length,
-      messages: event.messages.map((message: any) => ({
-        role: message.role,
-        text: textFromMessage(message),
-      })),
-    });
-  });
-
-  pi.on("before_provider_request", async (event) => {
-    await log("before_provider_request", { payload: event.payload });
-  });
-
-  pi.on("after_provider_response", async (event) => {
-    await log("after_provider_response", {
-      status: event.status,
-      headers: event.headers,
-    });
-  });
-
-  pi.on("message_start", async (event) => {
-    await log("message_start", {
-      role: event.message.role,
-      text: textFromMessage(event.message),
-    });
-  });
-
-  pi.on("message_end", async (event) => {
-    await log("message_end", {
-      role: event.message.role,
-      text: textFromMessage(event.message),
-    });
-  });
-
-  pi.on("tool_execution_start", async (event) => {
-    await log("tool_execution_start", {
-      toolCallId: event.toolCallId,
-      toolName: event.toolName,
-      args: event.args,
-    });
-  });
-
-  pi.on("tool_execution_end", async (event) => {
-    await log("tool_execution_end", {
-      toolCallId: event.toolCallId,
-      toolName: event.toolName,
-      result: event.result,
-      isError: event.isError,
-    });
-  });
-
-  pi.on("agent_end", async (event) => {
-    await log("agent_end", { messageCount: event.messages.length });
+  // ── Session shutdown: clear timer + final export ───────────────────────────
+  pi.on("session_shutdown", async (event, ctx) => {
+    if (intervalId) {
+      clearInterval(intervalId);
+      intervalId = undefined;
+    }
+    if (event.reason === "quit") {
+      await exportSession(ctx);
+    }
   });
 
   // ── Commands ───────────────────────────────────────────────────────────────
@@ -142,17 +107,6 @@ export default function (pi: ExtensionAPI) {
       if (ctx.hasUI) {
         ctx.ui.notify(`Hello, ${args || "world"}!`, "info");
       }
-    },
-  });
-
-  pi.registerCommand("log-path", {
-    description: "Print the path of the write-only interaction log",
-    handler: async (_args, ctx) => {
-      const path = store.path;
-      if (ctx.hasUI) {
-        ctx.ui.notify(path, "info");
-      }
-      console.log(path);
     },
   });
 

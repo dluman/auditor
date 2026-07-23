@@ -1,7 +1,7 @@
 {
   "name": "auditor",
   "version": "0.1.0",
-  "description": "A Pi coding agent extension that logs all LLM interactions to a write-only key/value store and exports recent prompts as patch files.",
+  "description": "A Pi coding agent extension that auto-exports the current session to JSONL every 5 minutes (configurable) and on shutdown, plus provides a patch-file tool for recent prompts.",
   "keywords": [
     "pi-package"
   ],
@@ -26,7 +26,7 @@
     ]
   },
   "dependencies": {
-    "unstorage": "^1.17.5"
+    "@juanibiapina/pi-extension-settings": "^0.9.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
