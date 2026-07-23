@@ -1,6 +1,8 @@
 import {
   type ExtensionAPI,
   CONFIG_DIR_NAME,
+  CURRENT_SESSION_VERSION,
+  type SessionHeader,
   type SessionEntry,
   parseSessionEntries,
 } from "@earendil-works/pi-coding-agent";
@@ -92,14 +94,13 @@ function formatHistoryForImport(entries: SessionEntry[]): string {
 }
 
 async function importSession(ctx: any, pi: ExtensionAPI) {
-  const sessionFile = ctx.sessionManager.getSessionFile();
-  if (!sessionFile) return;
+  const importPath = join(ctx.cwd, CONFIG_DIR_NAME, ".session.jsonl");
 
   // Only import if current session is empty
   if (ctx.sessionManager.getEntries().length > 0) return;
 
   try {
-    const fileEntries = await readSessionEntries(sessionFile);
+    const fileEntries = await readSessionEntries(importPath);
     if (fileEntries.length === 0) return;
 
     const historyText = formatHistoryForImport(fileEntries);
@@ -115,18 +116,20 @@ async function importSession(ctx: any, pi: ExtensionAPI) {
       { deliverAs: "steer" }
     );
 
-    console.log(`[${EXTENSION_NAME}] imported ${fileEntries.length} entries from ${sessionFile}`);
+    console.log(`[${EXTENSION_NAME}] imported ${fileEntries.length} entries from ${importPath}`);
   } catch (error) {
     console.error(`[${EXTENSION_NAME}] failed to import session:`, error);
   }
 }
 
 async function exportSession(ctx: any) {
-  const sessionFile = ctx.sessionManager.getSessionFile();
-  if (!sessionFile) return;
+  const exportDir = join(ctx.cwd, CONFIG_DIR_NAME);
+  const exportPath = join(exportDir, ".session.jsonl");
 
   try {
-    const existingEntries = await readSessionEntries(sessionFile);
+    await mkdir(exportDir, { recursive: true });
+
+    const existingEntries = await readSessionEntries(exportPath);
     const existingIds = new Set(existingEntries.map((e) => e.id));
 
     const branchEntries = ctx.sessionManager.getBranch();
@@ -145,9 +148,30 @@ async function exportSession(ctx: any) {
       return;
     }
 
-    const lines = newEntries.map((e) => JSON.stringify(e));
-    await appendFile(sessionFile, lines.join("\n") + "\n", "utf-8");
-    console.log(`[${EXTENSION_NAME}] appended ${newEntries.length} entries to ${sessionFile}`);
+    if (existingEntries.length === 0) {
+      // File is new or empty — write header + all branch entries
+      const header: SessionHeader = {
+        type: "session",
+        version: CURRENT_SESSION_VERSION,
+        id: ctx.sessionManager.getSessionId(),
+        timestamp: new Date().toISOString(),
+        cwd: ctx.sessionManager.getCwd(),
+      };
+      const lines: string[] = [JSON.stringify(header)];
+      let prevId: string | null = null;
+      for (const entry of branchEntries) {
+        const linear = { ...entry, parentId: prevId };
+        lines.push(JSON.stringify(linear));
+        prevId = entry.id;
+      }
+      await writeFile(exportPath, lines.join("\n") + "\n", "utf-8");
+      console.log(`[${EXTENSION_NAME}] exported session to ${exportPath}`);
+    } else {
+      // File exists — append only new entries
+      const lines = newEntries.map((e) => JSON.stringify(e));
+      await appendFile(exportPath, lines.join("\n") + "\n", "utf-8");
+      console.log(`[${EXTENSION_NAME}] appended ${newEntries.length} entries to ${exportPath}`);
+    }
   } catch (error) {
     console.error(`[${EXTENSION_NAME}] failed to export session:`, error);
   }
