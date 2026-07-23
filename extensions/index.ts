@@ -14,6 +14,7 @@ import { join } from "node:path";
 
 const EXTENSION_NAME = "auditor";
 const IMPORT_CUSTOM_TYPE = "auditor_session_import";
+let pendingImportPath: string | null = null;
 
 function sanitizeContent(content: unknown): unknown {
   if (!Array.isArray(content)) return content;
@@ -93,35 +94,6 @@ function formatHistoryForImport(entries: SessionEntry[]): string {
   return `Previous session history:\n\n${lines.join("\n\n")}`;
 }
 
-async function importSession(ctx: any, pi: ExtensionAPI) {
-  const importPath = join(ctx.cwd, CONFIG_DIR_NAME, ".session.jsonl");
-
-  // Only import if current session is empty
-  if (ctx.sessionManager.getEntries().length > 0) return;
-
-  try {
-    const fileEntries = await readSessionEntries(importPath);
-    if (fileEntries.length === 0) return;
-
-    const historyText = formatHistoryForImport(fileEntries);
-    if (!historyText) return;
-
-    pi.sendMessage(
-      {
-        customType: IMPORT_CUSTOM_TYPE,
-        content: historyText,
-        display: false,
-        details: {},
-      },
-      { deliverAs: "steer" }
-    );
-
-    console.log(`[${EXTENSION_NAME}] imported ${fileEntries.length} entries from ${importPath}`);
-  } catch (error) {
-    console.error(`[${EXTENSION_NAME}] failed to import session:`, error);
-  }
-}
-
 async function exportSession(ctx: any) {
   const exportDir = join(ctx.cwd, CONFIG_DIR_NAME);
   const exportPath = join(exportDir, ".session.jsonl");
@@ -194,15 +166,47 @@ export default function (pi: ExtensionAPI) {
     ],
   });
 
-  // ── Session start: auto-import + start periodic export timer ─────────────
+  // ── Session start: stage import for first turn + start periodic export timer ──
   pi.on("session_start", (_event, ctx) => {
-    importSession(ctx, pi);
+    // Stage import for the first turn if this is a fresh session
+    if (ctx.sessionManager.getEntries().length === 0) {
+      pendingImportPath = join(ctx.cwd, CONFIG_DIR_NAME, ".session.jsonl");
+    }
 
     const minutes = parseInt(getSetting(EXTENSION_NAME, "autoExportInterval", "5"), 10);
     if (minutes > 0) {
       intervalId = setInterval(() => {
         exportSession(ctx);
       }, minutes * 60 * 1000);
+    }
+  });
+
+  // ── Before agent start: inject history on the first turn ───────────────────
+  pi.on("before_agent_start", async () => {
+    if (!pendingImportPath) return;
+
+    const path = pendingImportPath;
+    pendingImportPath = null; // clear so it only fires once
+
+    try {
+      const fileEntries = await readSessionEntries(path);
+      if (fileEntries.length === 0) return;
+
+      const historyText = formatHistoryForImport(fileEntries);
+      if (!historyText) return;
+
+      console.log(`[${EXTENSION_NAME}] imported ${fileEntries.length} entries from ${path}`);
+
+      return {
+        message: {
+          customType: IMPORT_CUSTOM_TYPE,
+          content: historyText,
+          display: false,
+          details: {},
+        },
+      };
+    } catch (error) {
+      console.error(`[${EXTENSION_NAME}] failed to import session:`, error);
     }
   });
 
