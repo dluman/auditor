@@ -95,11 +95,9 @@ function formatHistoryForImport(entries: SessionEntry[]): string {
 }
 
 async function exportSession(ctx: any) {
-  const exportDir = join(ctx.cwd, CONFIG_DIR_NAME);
-  const exportPath = join(exportDir, ".session.jsonl");
+  const exportPath = join(ctx.cwd, ".session.jsonl");
 
   try {
-    await mkdir(exportDir, { recursive: true });
 
     const existingEntries = await readSessionEntries(exportPath);
     const existingIds = new Set(existingEntries.map((e) => e.id));
@@ -170,7 +168,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", (_event, ctx) => {
     // Stage import for the first turn if this is a fresh session
     if (ctx.sessionManager.getEntries().length === 0) {
-      pendingImportPath = join(ctx.cwd, CONFIG_DIR_NAME, ".session.jsonl");
+      pendingImportPath = join(ctx.cwd, ".session.jsonl");
     }
 
     const minutes = parseInt(getSetting(EXTENSION_NAME, "autoExportInterval", "5"), 10);
