@@ -10,6 +10,7 @@ import { getSetting } from "@juanibiapina/pi-extension-settings";
 import type { SettingDefinition } from "@juanibiapina/pi-extension-settings";
 import { Type } from "typebox";
 import { mkdir, writeFile, readFile, appendFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 const EXTENSION_NAME = "auditor";
@@ -168,7 +169,13 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", (_event, ctx) => {
     // Stage import for the first turn if this is a fresh session
     if (ctx.sessionManager.getEntries().length === 0) {
-      pendingImportPath = join(ctx.cwd, ".session.jsonl");
+      const importPath = join(ctx.cwd, ".session.jsonl");
+      if (existsSync(importPath)) {
+        pendingImportPath = importPath;
+        if (ctx.hasUI) {
+          ctx.ui.setStatus("auditor", "history ready");
+        }
+      }
     }
 
     const minutes = parseInt(getSetting(EXTENSION_NAME, "autoExportInterval", "5"), 10);
@@ -180,7 +187,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ── Before agent start: inject history on the first turn ───────────────────
-  pi.on("before_agent_start", async () => {
+  pi.on("before_agent_start", async (_event, ctx) => {
     if (!pendingImportPath) return;
 
     const path = pendingImportPath;
@@ -188,12 +195,26 @@ export default function (pi: ExtensionAPI) {
 
     try {
       const fileEntries = await readSessionEntries(path);
-      if (fileEntries.length === 0) return;
+      if (fileEntries.length === 0) {
+        if (ctx.hasUI) {
+          ctx.ui.setStatus("auditor", undefined);
+        }
+        return;
+      }
 
       const historyText = formatHistoryForImport(fileEntries);
-      if (!historyText) return;
+      if (!historyText) {
+        if (ctx.hasUI) {
+          ctx.ui.setStatus("auditor", undefined);
+        }
+        return;
+      }
 
       console.log(`[${EXTENSION_NAME}] imported ${fileEntries.length} entries from ${path}`);
+
+      if (ctx.hasUI) {
+        ctx.ui.setStatus("auditor", "history loaded");
+      }
 
       return {
         message: {
@@ -205,6 +226,9 @@ export default function (pi: ExtensionAPI) {
       };
     } catch (error) {
       console.error(`[${EXTENSION_NAME}] failed to import session:`, error);
+      if (ctx.hasUI) {
+        ctx.ui.setStatus("auditor", undefined);
+      }
     }
   });
 
