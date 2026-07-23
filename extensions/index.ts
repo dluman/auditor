@@ -1,11 +1,17 @@
-import { type ExtensionAPI, CONFIG_DIR_NAME, CURRENT_SESSION_VERSION, type SessionHeader } from "@earendil-works/pi-coding-agent";
+import {
+  type ExtensionAPI,
+  CONFIG_DIR_NAME,
+  type SessionEntry,
+  parseSessionEntries,
+} from "@earendil-works/pi-coding-agent";
 import { getSetting } from "@juanibiapina/pi-extension-settings";
 import type { SettingDefinition } from "@juanibiapina/pi-extension-settings";
 import { Type } from "typebox";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile, appendFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const EXTENSION_NAME = "auditor";
+const IMPORT_CUSTOM_TYPE = "auditor_session_import";
 
 function sanitizeContent(content: unknown): unknown {
   if (!Array.isArray(content)) return content;
@@ -26,36 +32,122 @@ function textFromMessage(message: any): string {
     .join("\n");
 }
 
+async function readSessionEntries(filePath: string): Promise<SessionEntry[]> {
+  try {
+    const content = await readFile(filePath, "utf-8");
+    const entries = parseSessionEntries(content);
+    return entries.filter((e): e is SessionEntry => e.type !== "session");
+  } catch {
+    return [];
+  }
+}
+
+function formatEntryForImport(entry: SessionEntry): string | null {
+  if (entry.type === "message" && entry.message) {
+    const msg = entry.message;
+    const timestamp = entry.timestamp;
+    const role = msg.role;
+
+    if (role === "user") {
+      const text = textFromMessage(msg);
+      return `[${timestamp}] user: ${text}`;
+    }
+
+    if (role === "assistant") {
+      const text = textFromMessage(msg);
+      const model = msg.model ? ` (${msg.model})` : "";
+      return `[${timestamp}] assistant${model}: ${text}`;
+    }
+
+    if (role === "toolResult") {
+      const text = textFromMessage(msg);
+      const toolName = msg.toolName || "tool";
+      return `[${timestamp}] toolResult (${toolName}): ${text}`;
+    }
+  }
+
+  if (entry.type === "thinking_level_change") {
+    return `[${entry.timestamp}] thinking level: ${entry.thinkingLevel}`;
+  }
+
+  if (entry.type === "model_change") {
+    return `[${entry.timestamp}] model: ${entry.provider}/${entry.modelId}`;
+  }
+
+  if (entry.type === "compaction") {
+    return `[${entry.timestamp}] [compaction] ${entry.summary.substring(0, 100)}...`;
+  }
+
+  return null;
+}
+
+function formatHistoryForImport(entries: SessionEntry[]): string {
+  const lines = entries
+    .map(formatEntryForImport)
+    .filter((line): line is string => line !== null);
+
+  if (lines.length === 0) return "";
+
+  return `Previous session history:\n\n${lines.join("\n\n")}`;
+}
+
+async function importSession(ctx: any, pi: ExtensionAPI) {
+  const sessionFile = ctx.sessionManager.getSessionFile();
+  if (!sessionFile) return;
+
+  // Only import if current session is empty
+  if (ctx.sessionManager.getEntries().length > 0) return;
+
+  try {
+    const fileEntries = await readSessionEntries(sessionFile);
+    if (fileEntries.length === 0) return;
+
+    const historyText = formatHistoryForImport(fileEntries);
+    if (!historyText) return;
+
+    pi.sendMessage(
+      {
+        customType: IMPORT_CUSTOM_TYPE,
+        content: historyText,
+        display: false,
+        details: {},
+      },
+      { deliverAs: "steer" }
+    );
+
+    console.log(`[${EXTENSION_NAME}] imported ${fileEntries.length} entries from ${sessionFile}`);
+  } catch (error) {
+    console.error(`[${EXTENSION_NAME}] failed to import session:`, error);
+  }
+}
+
 async function exportSession(ctx: any) {
   const sessionFile = ctx.sessionManager.getSessionFile();
   if (!sessionFile) return;
 
   try {
-    const exportDir = join(ctx.cwd, CONFIG_DIR_NAME);
-    const exportPath = join(exportDir, ".session.jsonl");
-
-    await mkdir(exportDir, { recursive: true });
-
-    const header: SessionHeader = {
-      type: "session",
-      version: CURRENT_SESSION_VERSION,
-      id: ctx.sessionManager.getSessionId(),
-      timestamp: new Date().toISOString(),
-      cwd: ctx.sessionManager.getCwd(),
-    };
+    const existingEntries = await readSessionEntries(sessionFile);
+    const existingIds = new Set(existingEntries.map((e) => e.id));
 
     const branchEntries = ctx.sessionManager.getBranch();
-    const lines: string[] = [JSON.stringify(header)];
 
-    let prevId: string | null = null;
+    // Find entries not already in the file
+    const newEntries: SessionEntry[] = [];
     for (const entry of branchEntries) {
-      const linear = { ...entry, parentId: prevId };
-      lines.push(JSON.stringify(linear));
-      prevId = entry.id;
+      if (existingIds.has(entry.id)) continue;
+      // Skip our own import entries to prevent feedback loops
+      if (entry.type === "custom_message" && entry.customType === IMPORT_CUSTOM_TYPE) continue;
+      newEntries.push(entry);
     }
 
-    await writeFile(exportPath, lines.join("\n") + "\n", "utf-8");
-    console.log(`[${EXTENSION_NAME}] exported session to ${exportPath}`);
+    if (newEntries.length === 0) {
+      console.log(`[${EXTENSION_NAME}] no new entries to export`);
+      return;
+    }
+
+    const lines = newEntries.map((e) => JSON.stringify(e));
+    await appendFile(sessionFile, lines.join("\n") + "\n", "utf-8");
+    console.log(`[${EXTENSION_NAME}] appended ${newEntries.length} entries to ${sessionFile}`);
   } catch (error) {
     console.error(`[${EXTENSION_NAME}] failed to export session:`, error);
   }
@@ -78,8 +170,10 @@ export default function (pi: ExtensionAPI) {
     ],
   });
 
-  // ── Session start: start periodic export timer ───────────────────────────────
+  // ── Session start: auto-import + start periodic export timer ─────────────
   pi.on("session_start", (_event, ctx) => {
+    importSession(ctx, pi);
+
     const minutes = parseInt(getSetting(EXTENSION_NAME, "autoExportInterval", "5"), 10);
     if (minutes > 0) {
       intervalId = setInterval(() => {
