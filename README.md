@@ -1,26 +1,38 @@
-# my-pi-extension
+# auditor
 
-A [Pi](https://pi.dev) extension that logs LLM interactions to a write-only key/value store and exports recent prompts as patch files.
+A [Pi](https://pi.dev) extension that continuously persists the current agent session to a project-local JSONL file and automatically restores history into fresh sessions.
 
 ## Install
 
 ```bash
 # From npm
-pi install npm:my-pi-extension
+pi install npm:auditor
 
 # From git
-pi install git:github.com/youruser/my-pi-extension
+pi install git:github.com/dluman/auditor
 
 # From a local path
-pi install /path/to/my-pi-extension
+pi install /path/to/auditor
 ```
 
-## Usage
+## What it does
 
-- `/log-path` — Show the path to the interaction log.
-- `create_patch_from_prompts` — Tool that writes recent user prompts to a patch file.
+- **Auto-export** — Every agent session is periodically written to `.session.jsonl` in the project root. The file is updated on a timer (default: every 5 minutes) and again when the session shuts down. Exports are append-only, so existing history is never overwritten.
+- **Auto-import** — When a new session starts with no prior messages, the extension automatically reads `.session.jsonl` from the project root and injects the previous session history as context. A status indicator in the footer shows when history is ready or loaded.
+- **Patch tool** — `create_patch_from_prompts` creates a JSON patch file containing recent session entries with timestamps, model names, tool results, and other metadata.
 
-Interactions are appended to `.pi/.sessions` (inside the Pi config directory for the current working directory). Each agent session is stored as a single JSON array containing all related events, from `agent_start` through `agent_end`. Use the `PI_CODING_AGENT_DIR` environment variable to override the base directory; the `.pi` subdirectory is always appended.
+## Configuration
+
+Open Pi Settings to change the **Auto-export interval**:
+
+- `0` — disables automatic exports
+- `5`, `10`, `30`, `60` — minutes between background exports (default: `5`)
+
+Manual exports still occur on shutdown regardless of the timer setting.
+
+## Files
+
+- `.session.jsonl` — Append-only JSONL session archive in the current working directory. Each line is a JSON object: a session header followed by all entries in the current branch.
 
 ## License
 
