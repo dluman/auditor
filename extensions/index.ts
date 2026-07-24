@@ -15,7 +15,6 @@ import { join } from "node:path";
 
 const EXTENSION_NAME = "auditor";
 const IMPORT_CUSTOM_TYPE = "auditor_session_import";
-const SUMMARY_CUSTOM_TYPE = "auditor_summary";
 let pendingImportPath: string | null = null;
 
 function sanitizeContent(content: unknown): unknown {
@@ -96,15 +95,6 @@ function formatHistoryForImport(entries: SessionEntry[]): string {
   return `Previous session history:\n\n${lines.join("\n\n")}`;
 }
 
-function buildSummaryText(entries: SessionEntry[], path: string): string {
-  const msgCount = entries.filter((e) => e.type === "message").length;
-  if (entries.length === 0) return "";
-  const firstTs = entries[0].timestamp;
-  const lastTs = entries[entries.length - 1].timestamp;
-  const dateStr = firstTs === lastTs ? firstTs : `${firstTs} — ${lastTs}`;
-  return `[${EXTENSION_NAME}] Loaded ${msgCount} messages from ${path} (${dateStr})`;
-}
-
 async function exportSession(ctx: any) {
   const exportPath = join(ctx.cwd, ".session.jsonl");
 
@@ -119,8 +109,8 @@ async function exportSession(ctx: any) {
     const newEntries: SessionEntry[] = [];
     for (const entry of branchEntries) {
       if (existingIds.has(entry.id)) continue;
-      // Skip our own import and summary entries to prevent feedback loops
-      if (entry.type === "custom_message" && (entry.customType === IMPORT_CUSTOM_TYPE || entry.customType === SUMMARY_CUSTOM_TYPE)) continue;
+      // Skip our own import entries to prevent feedback loops
+      if (entry.type === "custom_message" && entry.customType === IMPORT_CUSTOM_TYPE) continue;
       newEntries.push(entry);
     }
 
@@ -225,17 +215,6 @@ export default function (pi: ExtensionAPI) {
 
       if (ctx.hasUI) {
         ctx.ui.setStatus("auditor", "history loaded");
-      }
-
-      // Post a visible summary to the chat so the user sees what was loaded
-      const summaryText = buildSummaryText(fileEntries, ".session.jsonl");
-      if (summaryText) {
-        pi.sendMessage({
-          customType: SUMMARY_CUSTOM_TYPE,
-          content: summaryText,
-          display: true,
-          details: {},
-        });
       }
 
       return {
